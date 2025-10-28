@@ -1,0 +1,171 @@
+# =================================================================
+# CONFIGURAÇÃO GERAL DO AGENTE FILTERFLOW
+# =================================================================
+
+[geral]
+# Frequência de atualização em minutos.
+# ATENÇÃO: O código Rust espera 'intervalo_minutos'.
+intervalo_minutos = 30
+
+# Endereço API do LLM compatível com OpenAI (LM Studio, OLLAMA, etc.)
+# IMPORTANTE: Mantenha sempre com o protocolo http:// ou https://
+endereco = "http://localhost:1234/v1/chat/completions"
+
+# Nome do modelo a ser utilizado para resumo e análise de relevância.
+modelo_resumo = "liquid/lfm2-1.2b"
+# Modelos alternativos:
+# modelo_resumo = "qwen/qwen3-4b-thinking-2507"
+# modelo_resumo = "openai/gpt-oss-20b"
+
+# Definição do user agent para o reqwest nos casos de busca em sitemap (Evita bloqueios 403).
+#user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+user_agent = "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0"
+
+# Oculta o cálculo de latência da filtragem de relevância feita pelo llm.
+ocultar_latencia = true
+
+# Número de tokens máximo para o resumo
+max_tokens_resumo = 270
+# Temperatura do resumo
+temperatura_resumo = 0.3
+# Prompt do resumo
+max_tokens_filtro = 1
+temperatura_filtro = 0.2
+# Prompt passados ao LLM. Note que é importante manter os colchetes onde serão injetadas os
+# dados da notícia, para filtragem e posterior resumo.
+prompt_system_filtro = "Você é um classificador de notícias conciso."
+prompt_system_resumo = "Você é um assistente conciso e imparcial."
+prompt_user_resumo_template = "Resuma a seguinte notícia em no máximo 250 tokens em português. Se a notícia tiver em inglês o resumo deverá ser em inglês. NÃO adicione introduções como 'O resumo é:' ou 'A notícia é sobre:'.\n\nTítulo: {}\n\nCorpo/Descrição: {}"
+# =================================================================
+# CONFIGURAÇÃO DE PROXY (Opcional)
+# =================================================================
+
+[proxy]
+# Ativa ou desativa o uso de proxy. Valores: true ou false
+usar_proxy = false
+
+# O endereço completo do seu proxy HTTP/HTTPS.
+# Deve incluir o esquema (http:// ou https://) e a porta.
+# endereco_proxy = "http://proxy.meioambiente.mg.gov.br:8080"
+endereco_proxy = "https://127.0.0.1:8081"
+
+
+# =================================================================
+# FILTRO DE PALAVRAS-CHAVE
+# =================================================================
+
+[filtro]
+# Lista de palavras-chave para o LLM filtrar notícias (case-insensitive).
+indicadores_relevancia = [
+    "Bitcoin",
+    "Ações",
+    "Finanças",
+    "Eleições",
+    "Inteligência Artificial",
+    "Tecnologia",
+    "Fundos imobiliários",
+    "Agronegócio",
+    "Astronomia",
+    "Segurança digital",
+    "Linux",
+    "Criptoativos",
+    "Meteorologia em Minas Gerais",
+    "Clima",
+    "Sistemas operacionais",
+    "Fiagros",
+    "FIP-IE",
+    "Petróleo",
+    "Energia",
+    "Infraestrutura",
+    "Atletico Mineiro"
+]
+indicadores_irrelevancia = [
+    "celebridades",
+    "fofoca",
+    "jogador"
+]
+
+# =================================================================
+# FONTES DE FEEDS RSS
+# =================================================================
+
+[[feeds]]
+nome = "G1 Minas Gerais"
+url = "https://g1.globo.com/rss/g1/minas-gerais/"
+
+# [[feeds]]
+# nome = "G1 Brasil"
+# url = "https://g1.globo.com/rss/g1/brasil/"
+
+[[feeds]]
+nome = "Folha de S.Paulo - Últimas Notícias"
+url = "https://feeds.folha.uol.com.br/emcimadahora/rss091.xml"
+
+[[feeds]]
+nome = "Tecnoblog"
+url = "https://tecnoblog.net/feed/"
+
+[[feeds]]
+nome = "Space Today"
+url = "https://spacetoday.com.br/feed/"
+
+[[feeds]]
+nome = "Estadão E-Investidor"
+url = "https://einvestidor.estadao.com.br/feed/"
+
+[[feeds]]
+nome = "CNN Brasil - Últimas Notícias"
+url = "https://www.cnnbrasil.com.br/feed/ultimas-noticias/"
+
+[[feeds]]
+nome = "Brazil Journal - Geral"
+url = "https://braziljournal.com/feed/"
+
+[[feeds]]
+nome = "Brazil Journal - Tecnologia"
+url = "https://braziljournal.com/tag/tecnologia/feed/"
+
+[[feeds]]
+nome = "Cyber Security Brazil"
+url = "https://www.cybersecbrazil.com.br/blog-feed.xml"
+
+[[feeds]]
+nome = "Hardware.com.br"
+url = "https://www.hardware.com.br/feed/"
+
+[[feeds]]
+nome = "Slashdot"
+url = "https://rss.slashdot.org/Slashdot/slashdotMain"
+
+[[feeds]]
+nome = "INMET"
+url = "https://apiprevmet3.inmet.gov.br/avisos/rss"
+
+[[feeds]]
+nome = "Metro Quadrado"
+url = "https://metroquadrado.com/feed"
+
+[[feeds]]
+nome = "Javier Blas"
+url = "https://www.bloomberg.com/authors/ASIsQsgx0V8/javier-blas.rss"
+
+[[sitemaps]]
+nome = "InvestNews"
+url = "https://investnews.com.br/feed-news"
+
+# Feeds Comentados:
+# [[feeds]]
+# nome = "Bom dia mercado"
+# url = "www.bomdiamercado.com.br/feed/"
+#
+# [[feeds]]
+# nome = "Arts Techninca"
+# url = "https://arstechnica.com/feed"
+#
+# [[feeds]]
+# nome = "CNN Brasil - Economia"
+# url = "https://www.cnnbrasil.com.br/feed/economia/"
+#
+# [[feeds]]
+# nome = "CNN Brasil - Tecnologia"
+# url = "https://www.cnnbrasil.com.br/feed/tecnologia/"
