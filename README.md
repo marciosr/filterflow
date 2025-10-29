@@ -49,7 +49,7 @@ source $HOME/.cargo/env
    Bash
    
    ```
-   git clone [LINK_DO_SEU_REPOSITÓRIO]
+   https://github.com/marciosr/filterflow.git
    cd filterflow
    ```
 
