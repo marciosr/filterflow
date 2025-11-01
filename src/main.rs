@@ -1,5 +1,5 @@
 use async_recursion::async_recursion;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Local, Utc};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::{Client, Proxy};
@@ -184,7 +184,7 @@ async fn call_llm_filter(
 
 	// 1. Injeção da variável no template
 	let prompt_content = format!(
-		"Avalie a relevância da notícia. Título: '{}' | Descrição: '{}'.\n\nCondições:\n1. A notícia é **principalmente** sobre um ou mais destes tópicos de INCLUSÃO: ({})\n2. A notícia **NÃO** deve conter nenhum destes tópicos de EXCLUSÃO: ({})\n\nSe AMBAS as condições forem satisfeitas, responda '1'. Caso contrário, responda '0'. Responda APENAS '1' ou '0'.",
+		"Avalie a relevância da notícia. Título: '{}' | Descrição: '{}'.\n\nCondições:\n1. A notícia é **principalmente** sobre um ou mais destes tópicos de INCLUSÃO: ({})\n2. A notícia **NÃO pode** estar relacionado a nenhum dos seguintes termos: ({}).\n\nSe AMBAS as condições forem satisfeitas, responda '1'. Caso contrário, responda '0'. Responda APENAS '1' ou '0'.",
 		title, description, termos1, termos2
 	);
 
@@ -793,7 +793,7 @@ async fn processar_sitemap(
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	println!(
 		"{}{}{}",
-		BOLD, "--- FilterFlow: Agente de Notícias em Rust ---", RESET
+		BOLD, "--- FilterFlow: Agente de Notícias para LLMs locais ---", RESET
 	);
 
 	// 1. Inicialização de âncora (Carregar a config uma vez para iniciar o DB e logar)
@@ -892,10 +892,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			"\n{}=================================================={}",
 			BOLD, RESET
 		);
-		println!("{}Iniciando ciclo de varredura...{}", BOLD, RESET);
+		println!("{}        Iniciando ciclo de varredura...{}", BOLD, RESET);
 		println!(
 			"{}=================================================={}",
 			BOLD, RESET
+		);
+
+		let agora = Local::now();
+		println!(
+			"        {}\n",
+			agora.format("Data: %d/%m/%Y - Hora: %H:%M:%S")
 		);
 
 		let cycle_start_time = Instant::now();
@@ -958,6 +964,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		println!(
 			"\n{} ***************** CICLO CONCLUÍDO *****************\n                  Tempo Total: {:.2?} {}",
 			BOLD_GREEN, cycle_duration, RESET
+		);
+		let agora_final = Local::now();
+		println!(
+			"        {}\n",
+			agora_final.format("        Data: %d/%m/%Y - Hora: %H:%M:%S")
 		);
 
 		// 7. Lógica de Espera
