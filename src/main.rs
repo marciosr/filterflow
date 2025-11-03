@@ -28,6 +28,7 @@ const BOLD: &str = "\x1b[1m";
 const BOLD_GREEN: &str = "\x1b[1;32m";
 const RESET: &str = "\x1b[0m";
 const BOLD_RED: &str = "\x1b[1;31m";
+const BOLD_YELLOW: &str = "\x1b[1;33m";
 
 // --- Estruturas de Configuração (Lidas do TOML) ---
 
@@ -900,7 +901,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 		let agora = Local::now();
 		println!(
-			"        {}\n",
+			"      {}\n",
 			agora.format("Data: %d/%m/%Y - Hora: %H:%M:%S")
 		);
 
@@ -965,10 +966,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			"\n{} ***************** CICLO CONCLUÍDO *****************\n                  Tempo Total: {:.2?} {}",
 			BOLD_GREEN, cycle_duration, RESET
 		);
+
+		// Taxa de utilização do tempo do sistema
+		println!(
+			"\n      {}Índice de utilização do sistema: {:.2}%{}",
+			BOLD_YELLOW,
+			(cycle_duration.as_secs_f32() / (geral_config_arc.intervalo_minutos as f32 * 60.0))
+				* 100.0,
+			RESET
+		);
+
 		let agora_final = Local::now();
 		println!(
 			"        {}\n",
-			agora_final.format("        Data: %d/%m/%Y - Hora: %H:%M:%S")
+			agora_final.format("     Data: %d/%m/%Y - Hora: %H:%M:%S")
 		);
 
 		// 7. Lógica de Espera
