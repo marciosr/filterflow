@@ -5,13 +5,20 @@ use regex::Regex;
 use reqwest::{Client, Proxy};
 use rss::{Channel, Item};
 use serde::Deserialize;
+use serde_json;
 use sitemap::{
 	reader::{SiteMapEntity, SiteMapReader},
 	structs::LastMod,
 };
 use sled::Db;
 use std::{
-	error::Error, fs, io, io::BufReader, sync::Arc, time::Duration as StdDuration, time::Instant,
+	error::Error,
+	fs::{OpenOptions, create_dir_all},
+	io::{BufReader, Error as io_error, Write},
+	path::PathBuf,
+	sync::Arc,
+	time::Duration as StdDuration,
+	time::Instant,
 };
 use tokio::time;
 use url::Url;
@@ -56,16 +63,17 @@ struct GeralConfig {
 	endereco: String,
 	intervalo_minutos: u64,
 	modelo_resumo: String,
+	diretorio_arquivamento: String,
 	user_agent: String,
 	ocultar_latencia: Option<bool>,
 
 	// NOVOS PARÂMETROS LLM (Sem Timeouts!)
 	max_tokens_filtro: u32,
-	temperatura_filtro: f32,
+	temperature_filtro: f32,
 	max_tokens_resumo: u32,
-	temperatura_resumo: f32,
+	temperature_resumo: f32,
 	prompt_system_filtro: String,
-	prompt_system_resumo: String,
+	//prompt_system_resumo: String,
 	prompt_user_resumo_template: String,
 }
 
@@ -97,7 +105,7 @@ struct ChatCompletionRequest {
 	model: String,
 	messages: Vec<Message>,
 	max_tokens: u32,
-	temperatura: f32,
+	temperature: f32,
 	stream: bool,
 }
 
@@ -111,18 +119,24 @@ struct Choice {
 	message: Message,
 }
 
+#[derive(Debug, Deserialize)]
+struct RespostaProcessada {
+	resumo: String,
+	keywords: Vec<String>,
+}
+
 // =================================================================
 // FUNÇÕES DE COMUNICAÇÃO LLM (TIMEOUTS FIXOS REVERTIDOS)
 // =================================================================
 
 /// Função de resumo das notícias por llm
-async fn call_llm_summarize(
+async fn resuma_noticia(
 	client: &Client,
 	title: &str,
 	description: &str,
-	config: Arc<GeralConfig>, // Recebe a config como Arc
-) -> Result<String, Box<dyn std::error::Error>> {
-	// 1. Injeção da variável no template
+	config: Arc<GeralConfig>,
+) -> Result<RespostaProcessada, Box<dyn std::error::Error>> {
+	// Prompt para extrair JSON com resumo e palavras-chave
 	let prompt_content = format!(
 		"{} {} {}",
 		&config.prompt_user_resumo_template, title, description
@@ -133,7 +147,7 @@ async fn call_llm_summarize(
 		messages: vec![
 			Message {
 				role: "system".to_string(),
-				content: config.prompt_system_resumo.clone(),
+				content: "Você é um extrator de dados JSON.".to_string(),
 			},
 			Message {
 				role: "user".to_string(),
@@ -141,38 +155,34 @@ async fn call_llm_summarize(
 			},
 		],
 		max_tokens: config.max_tokens_resumo,
-		temperatura: config.temperatura_resumo,
+		temperature: config.temperature_resumo,
 		stream: false,
 	};
 
-	// TIMEOUT FIXO REVERTIDO PARA 30s
 	let response = client
 		.post(&config.endereco)
 		.json(&request_body)
-		.timeout(StdDuration::from_secs(30))
 		.send()
 		.await?;
-
-	if !response.status().is_success() {
-		return Err(format!(
-			"Erro de Status HTTP no Resumo ({}): {}",
-			config.endereco,
-			response.status()
-		)
-		.into());
-	}
-
 	let response_json: ChatCompletionResponse = response.json().await?;
 
 	if let Some(choice) = response_json.choices.into_iter().next() {
-		return Ok(choice.message.content.trim().to_string());
+		let content = choice.message.content.trim();
+		// Limpeza básica de blocos de código se o LLM os incluir
+		let json_str = content
+			.trim_start_matches("```json")
+			.trim_start_matches("```")
+			.trim_end_matches("```")
+			.trim();
+		let processada: RespostaProcessada = serde_json::from_str(json_str)?;
+		return Ok(processada);
 	}
 
-	Ok("[Resposta de resumo vazia]".to_string())
+	Err("Resposta do LLM vazia".into())
 }
 
 /// Filtro de relevância de notícias executado por llm
-async fn call_llm_filter(
+async fn filtre_noticia(
 	client: &Client,
 	title: &str,
 	description: &str,
@@ -202,7 +212,7 @@ async fn call_llm_filter(
 			},
 		],
 		max_tokens: geral_config.max_tokens_filtro,
-		temperatura: geral_config.temperatura_filtro,
+		temperature: geral_config.temperature_filtro,
 		stream: false,
 	};
 
@@ -259,13 +269,54 @@ async fn call_llm_filter(
 	Ok(false)
 }
 
+fn caminho_relativo_diretorio(path: &str) -> String {
+	if path.starts_with("~/") {
+		if let Some(home) = dirs::home_dir() {
+			return path.replacen("~", &home.to_string_lossy(), 1);
+		}
+	}
+	path.to_string()
+}
+
+fn salvar_em_markdown(
+	titulo: &str,
+	link: &str,
+	dados: &RespostaProcessada,
+	archive_path: String,
+) -> std::io::Result<()> {
+	create_dir_all(archive_path.as_str())?;
+	let data_atual = Local::now().format("%Y-%m-%d").to_string();
+	let caminho = std::path::PathBuf::from(archive_path).join(format!("{}.md", data_atual));
+
+	let mut file = OpenOptions::new().create(true).append(true).open(caminho)?;
+
+	let tags = dados
+		.keywords
+		.iter()
+		.map(|k| format!("#{}", k.to_lowercase().replace(' ', "_")))
+		.collect::<Vec<String>>()
+		.join(" ");
+
+	let entrada = format!(
+		"## {}\n\n**Link:** [{}]({})\n\n> {}\n\n**Tags:** {}\n\n*Hora: {}* \n\n---\n\n",
+		titulo,
+		titulo,
+		link,
+		dados.resumo,
+		tags,
+		Local::now().format("%H:%M:%S"),
+	);
+
+	file.write_all(entrada.as_bytes())
+}
+
 // =================================================================
 // FUNÇÕES AUXILIARES E DB
 // =================================================================
 
 fn clean_html_content(html: &str) -> String {
-	let tag_regex = Regex::new(r"<[^>]*>").unwrap();
-	let clean_text = tag_regex.replace_all(html, " ").to_string();
+	static HTML_TAG_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"<[^>]*>").unwrap());
+	let clean_text = HTML_TAG_REGEX.replace_all(html, " ").to_string();
 
 	let clean_text = clean_text
 		.replace('\n', " ")
@@ -287,13 +338,13 @@ fn db_init_trees(db_path: &str) -> Result<sled::Db, sled::Error> {
 	Ok(db)
 }
 
-fn db_is_irrelevant(db: &Db, link: &str) -> Result<bool, io::Error> {
+fn db_is_irrelevant(db: &Db, link: &str) -> Result<bool, io_error> {
 	let tree = db.open_tree(IRRELEVANT_CACHE_TREE)?;
 	let exists = tree.contains_key(link.as_bytes())?;
 	Ok(exists)
 }
 
-fn db_cache_as_irrelevant(db: &Db, link: &str) -> Result<(), io::Error> {
+fn db_cache_as_irrelevant(db: &Db, link: &str) -> Result<(), io_error> {
 	let tree = db.open_tree(IRRELEVANT_CACHE_TREE)?;
 	tree.insert(link.as_bytes(), b"1")?;
 	tree.flush()?;
@@ -435,9 +486,23 @@ fn validate_config(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
+/// Retorna o caminho para o arquivo de configuração TOML: ~/.config/filterflow/filterflow_config.toml
+fn get_config_path() -> PathBuf {
+	let mut config_path = dirs::config_dir().unwrap_or_else(|| {
+		eprintln!(
+			"[filterflow] Aviso: Não foi possível determinar o diretório de configuração. Usando ./"
+		);
+		PathBuf::from(".")
+	});
+	config_path.push("filterflow");
+	let _ = create_dir_all(&config_path);
+	config_path.push(CONFIG_FILE);
+	config_path
+}
+
 /// Carregar a configuração
 fn carregar_config() -> Result<Config, Box<dyn std::error::Error>> {
-	let config_content = fs::read_to_string(CONFIG_FILE)?;
+	let config_content = std::fs::read_to_string(get_config_path())?;
 	let config: Config = toml::from_str(&config_content)?;
 	validate_config(&config)?;
 	Ok(config)
@@ -475,7 +540,7 @@ async fn process_single_item_logic(
 	}
 
 	// 2. Filtragem Semântica (Fase 1: Rápida)
-	let is_relevant = match call_llm_filter(
+	let is_relevant = match filtre_noticia(
 		client,
 		title,
 		description,
@@ -503,16 +568,27 @@ async fn process_single_item_logic(
 		);
 		println!("{}Link:{} {}", BOLD, RESET, link);
 
-		// 3. Fase 2: RESUMO (Pesado, Condicional)
-		match call_llm_summarize(client, title, description, Arc::clone(&geral_config)).await {
-			Ok(resumo) => {
+		// 3. Fase 2: RESUMO E KEYWORDS
+		match resuma_noticia(client, title, description, Arc::clone(&geral_config)).await {
+			Ok(dados) => {
+				println!("\n{}Resumo: {}{}\n", BOLD_YELLOW, dados.resumo, RESET);
 				println!(
-					"\n{}Resumo (Modelo: {}):\n{}{}\n",
-					BOLD, geral_config.modelo_resumo, RESET, resumo
+					"{}Palavras-chave: {:?}{}",
+					BOLD_YELLOW, dados.keywords, RESET
 				);
+
+				// Salva notícias relevantes de forma estruturada em diretório prédeterminado
+				if let Err(e) = salvar_em_markdown(
+					title,
+					link,
+					&dados,
+					caminho_relativo_diretorio(&geral_config.diretorio_arquivamento.as_str()),
+				) {
+					eprintln!("[ERRO] Falha ao arquivar Markdown: {}", e);
+				}
 			}
 			Err(e) => {
-				eprintln!("\n[ERRO LLM] Falha ao resumir notícia: {}", e);
+				eprintln!("\n[ERRO LLM] Falha ao resumir/extrair tags: {}", e);
 			}
 		}
 
@@ -534,7 +610,7 @@ async fn process_single_item_logic(
 // FUNÇÕES DE PROCESSAMENTO DE FEEDS RSS
 // =================================================================
 
-async fn processar_feed(
+async fn process_feed(
 	client: &Client,
 	db: &Arc<sled::Db>,
 	feed: &FeedConfig,
@@ -786,10 +862,6 @@ async fn processar_sitemap(
 	Ok(urls_processadas)
 }
 
-// =================================================================
-// MAIN
-// =================================================================
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	println!(
@@ -827,7 +899,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	);
 
 	// 2. Inicializar o Banco de Dados (sled) - DEVE SER ARC FORA DO LOOP
-	let db = db_init_trees(DB_PATH)?;
+	let full_path = format!(
+		"{}/{}",
+		caminho_relativo_diretorio(&initial_config.geral.diretorio_arquivamento),
+		DB_PATH
+	);
+
+	// Garante que a árvore de diretórios exista no SSD antes do sled abrir
+	std::fs::create_dir_all(caminho_relativo_diretorio(
+		&initial_config.geral.diretorio_arquivamento,
+	))?;
+
+	let db = db_init_trees(&full_path)?;
 	let db_arc = Arc::new(db); // Empacota o DB em Arc para ser Thread-Safe
 	println!("\nBanco de dados iniciado em: {}", DB_PATH);
 
@@ -909,7 +992,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 		// 5. Processamento dos Feeds RSS
 		for feed in feeds_arc.iter() {
-			if let Err(e) = processar_feed(
+			if let Err(e) = process_feed(
 				&client,
 				&db_arc, // Passando o Arc<Db>
 				feed,
