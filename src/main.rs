@@ -222,7 +222,7 @@ async fn filtre_noticia(
 	let response = client
 		.post(&geral_config.endereco)
 		.json(&request_body)
-		.timeout(StdDuration::from_secs(10))
+		.timeout(StdDuration::from_secs(15))
 		.send()
 		.await?;
 
@@ -571,7 +571,7 @@ async fn process_single_item_logic(
 		// 3. Fase 2: RESUMO E KEYWORDS
 		match resuma_noticia(client, title, description, Arc::clone(&geral_config)).await {
 			Ok(dados) => {
-				println!("\n{}Resumo: {}{}\n", BOLD_YELLOW, dados.resumo, RESET);
+				println!("\n{}Resumo:\n {}{}\n", BOLD_YELLOW, dados.resumo, RESET);
 				println!(
 					"{}Palavras-chave: {:?}{}",
 					BOLD_YELLOW, dados.keywords, RESET
