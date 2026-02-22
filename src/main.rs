@@ -1,10 +1,11 @@
 use async_recursion::async_recursion;
+use axum::{Json, Router, extract::State, response::IntoResponse, routing::get, routing::post};
 use chrono::{DateTime, Duration, Local, Utc};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::{Client, Proxy};
 use rss::{Channel, Item};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json;
 use sitemap::{
 	reader::{SiteMapEntity, SiteMapReader},
@@ -21,6 +22,8 @@ use std::{
 	time::Instant,
 };
 use tokio::time;
+use tower_http::cors::Any;
+use tower_http::cors::CorsLayer;
 use url::Url;
 
 // --- Constantes Globais ---
@@ -125,6 +128,20 @@ struct RespostaProcessada {
 	keywords: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct Noticia {
+	id: String,
+	titulo: String,
+	resumo: String,
+	url: String,
+	data_publicacao: DateTime<Utc>,
+	lida: bool,
+}
+
+#[derive(Deserialize)]
+pub struct MarcarLidaRequest {
+	pub id: String,
+}
 // =================================================================
 // FUNÇÕES DE COMUNICAÇÃO LLM (TIMEOUTS FIXOS REVERTIDOS)
 // =================================================================
@@ -571,11 +588,30 @@ async fn process_single_item_logic(
 		// 3. Fase 2: RESUMO E KEYWORDS
 		match resuma_noticia(client, title, description, Arc::clone(&geral_config)).await {
 			Ok(dados) => {
+				// 1. Criar a struct Noticia com os dados reais
+				let nova_noticia = Noticia {
+					id: link.to_string(), // ou um hash
+					titulo: title.to_string(),
+					resumo: dados.resumo.clone(),
+					url: link.to_string(),
+					data_publicacao: Utc::now(),
+					lida: false,
+				};
+
 				println!("\n{}Resumo:\n {}{}\n", BOLD_YELLOW, dados.resumo, RESET);
 				println!(
 					"{}Palavras-chave: {:?}{}",
 					BOLD_YELLOW, dados.keywords, RESET
 				);
+
+				// 2. Converter para bytes JSON
+				if let Ok(noticia_bytes) = serde_json::to_vec(&nova_noticia) {
+					// 3. SALVAR A NOTÍCIA COMPLETA NO DB (em vez de apenas "processed")
+					if let Err(e) = db.insert(db_key, noticia_bytes) {
+						eprintln!("[ERRO DB] Falha ao salvar Noticia: {}", e);
+					}
+					let _ = db.flush(); // Garante a gravação no NVMe
+				}
 
 				// Salva notícias relevantes de forma estruturada em diretório prédeterminado
 				if let Err(e) = salvar_em_markdown(
@@ -593,9 +629,9 @@ async fn process_single_item_logic(
 		}
 
 		// 4. Salvar no DB (apenas se for relevante e processada)
-		if let Err(e) = db.insert(db_key, b"processed") {
-			eprintln!("[ERRO DB] Falha ao salvar na Árvore Principal: {}", e);
-		}
+		//if let Err(e) = db.insert(db_key, b"processed") {
+		//	eprintln!("[ERRO DB] Falha ao salvar na Árvore Principal: {}", e);
+		//}
 		return Ok(true); // Processed as relevant
 	} else {
 		// 5. Se irrelevante (LLM retornou '0'), salvar no cache
@@ -914,6 +950,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let db_arc = Arc::new(db); // Empacota o DB em Arc para ser Thread-Safe
 	println!("\nBanco de dados iniciado em: {}", DB_PATH);
 
+	// Início da API de comunicação com o dash
+	let db_api = Arc::clone(&db_arc);
+
+	// Porta da API (pode colocar no seu config.toml depois)
+	let api_port = "4000";
+
+	tokio::spawn(async move {
+		let cors = CorsLayer::new()
+			.allow_origin(Any)
+			.allow_methods(Any)
+			.allow_headers(Any);
+
+		let app = Router::new()
+			.route("/api/noticias", get(api_listar_noticias))
+			.route("/api/noticias/ler", post(api_marcar_como_lida))
+			.with_state(db_api)
+			.layer(cors);
+
+		let listener = match tokio::net::TcpListener::bind(format!("0.0.0.0:{}", api_port)).await {
+			Ok(l) => l,
+			Err(e) => {
+				eprintln!("[ERRO API] Não foi possível iniciar o servidor: {}", e);
+				return;
+			}
+		};
+
+		println!(
+			"{}🚀 API de Notícias ativa em: http://localhost:{}/api/noticias{}",
+			BOLD_GREEN, api_port, RESET
+		);
+		axum::serve(listener, app).await.unwrap();
+	});
+	// Fim da API
 	let mut sleep_duration = StdDuration::from_secs(initial_config.geral.intervalo_minutos * 60);
 
 	// --- Loop Principal de Atualização ---
@@ -1073,4 +1142,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 		time::sleep(sleep_duration).await;
 	}
+}
+
+async fn api_listar_noticias(State(db): State<Arc<sled::Db>>) -> impl IntoResponse {
+	// Itera diretamente no banco, filtrando apenas o que consegue converter com sucesso
+	let mut noticias: Vec<Noticia> = db
+		.iter()
+		.filter_map(|item| item.ok()) // Descarta erros de leitura de hardware/disco
+		.filter_map(|(_, v)| serde_json::from_slice::<Noticia>(&v).ok()) // Descarta dados malformados
+		.collect();
+
+	// Ordenação (opcional): se quiser as mais recentes primeiro
+	noticias.sort_by(|a, b| b.data_publicacao.cmp(&a.data_publicacao));
+
+	Json(noticias)
+}
+
+async fn api_marcar_como_lida(
+	State(db): State<Arc<sled::Db>>,
+	// 2. Mude de Json<String> para Json<MarcarLidaRequest>
+	Json(payload): Json<MarcarLidaRequest>,
+) -> impl IntoResponse {
+	// 3. Use payload.id para acessar o valor
+	let id = payload.id;
+
+	if let Ok(Some(bytes)) = db.get(id.as_bytes()) {
+		if let Ok(mut noticia) = serde_json::from_slice::<Noticia>(&bytes) {
+			noticia.lida = true;
+
+			if let Ok(noticia_bytes) = serde_json::to_vec(&noticia) {
+				let _ = db.insert(id.as_bytes(), noticia_bytes);
+				let _ = db.flush();
+				return axum::http::StatusCode::OK;
+			}
+		}
+	}
+	axum::http::StatusCode::NOT_FOUND
 }
