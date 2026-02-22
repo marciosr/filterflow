@@ -1,151 +1,198 @@
-# 📚 FilterFlow: Agente Inteligente de Notícias em Rust
+# 🌊 FilterFlow: Ecossistema Inteligente de Notícias em Rust
 
-O FilterFlow é um agente de notícias assíncrono escrito em Rust que monitora feeds RSS e Sitemaps de forma contínua, filtra o conteúdo usando um LLM (Large Language Model) local e apresenta apenas as notícias relevantes e resumidas para o usuário. Ele utiliza o banco de dados `sled` para cache e evita reprocessar conteúdo.
+O **FilterFlow** é um agente assíncrono de curadoria de conteúdo que monitora feeds RSS e Sitemaps, utiliza Inteligência Artificial local (LLM) para filtrar relevância e disponibiliza os resultados através de uma API robusta e um Dashboard reativo.
 
-## ⚙️ 1. Preparação do Ambiente (Fedora Silverblue + Toolbox)
+## 🏗️ 1. Arquitetura do Projeto
 
-Recomendamos utilizar o Toolbox no Fedora Silverblue para isolar o ambiente de desenvolvimento e compilação do Rust.
+O projeto é organizado como um **Rust Workspace**, garantindo que o backend e o frontend compartilhem dependências de forma eficiente:
 
-### 1.1. Configuração do Toolbox
+* **`filterflow_backend`**: O motor (Core). Responsável pelo crawling, filtragem via LLM, arquivamento em Markdown e exposição da API REST.
+* **`filterflow_dash`**: O cliente (Frontend). Uma interface web construída com **Axum** e **HTMX** para visualização rápida das notícias filtradas.
 
-1. **Crie e entre no Toolbox:**
-   
-   Bash
-   
-   ```
-   toolbox create -c rust-dev
-   toolbox enter rust-dev
-   ```
+---
 
-2. **Instale as dependências básicas no Toolbox:**
-   
-   Bash
-   
-   ```
-   # Atualize o sistema
-   sudo dnf update -y
-   # Instale dependências de compilação
-   sudo dnf install -y clang make
-   ```
+## 🛠️ 2. Tecnologias Utilizadas
 
-### 1.2. Instalação do Rust
+### Core & Backend
 
-Dentro do Toolbox, instale o Rust usando o `rustup`:
+| Crate | Função |
+| --- | --- |
+| `tokio` | Runtime assíncrono de alta performance. |
+| `axum` | Web framework para a API e o Servidor do Dashboard. |
+| `sled` | Banco de dados *key-value* embutido para persistência ultra-rápida. |
+| `reqwest` | Cliente HTTP para coleta de dados e comunicação com LLM. |
+| `serde` | Serialização e desserialização de dados (JSON/TOML). |
 
-Bash
+### Dashboard & UI
 
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# Selecione a opção '1' para instalação padrão.
+| Tecnologia | Função |
+| --- | --- |
+| **HTMX** | Reatividade frontend sem a necessidade de frameworks JS pesados. |
+| **Markdown** | Formato de arquivamento das notícias para leitura offline e portabilidade. |
+| **Jin2 / Askama** | Motores de template para renderização de HTML no servidor. |
 
-# Carregue o ambiente
-source $HOME/.cargo/env
-```
+---
 
-### 1.3. Clonagem e Compilação do Projeto
+## 🚀 3. Novas Capacidades
 
-1. **Clone o repositório:**
-   
-   Bash
-   
-   ```
-   https://github.com/marciosr/filterflow.git
-   cd filterflow
-   ```
+### 📂 Arquivamento em Markdown
 
-2. **Compile o projeto:**
-   
-   Bash
-   
-   ```
-   cargo build --release
-   ```
+Agora, cada notícia considerada relevante é automaticamente convertida e salva em arquivos `.md`. Isso permite que você tenha um histórico permanente, pesquisável e compatível com ferramentas como Obsidian ou Notion.
 
-O executável compilado estará em `./target/release/filterflow`.
+### 🌐 API de Notícias
 
-## 🛠️ 2. Bibliotecas Rust Necessárias
+O backend agora expõe um endpoint `/noticias` que serve o conteúdo filtrado e resumido em formato JSON, permitindo que qualquer cliente (como o FilterFlow Dash) consuma as informações em tempo real.
 
-FilterFlow depende das bibliotecas abaixo:
+---
 
-| **Crate**         | **Função**                                                                                                         |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `tokio`           | *Runtime* assíncrono para lidar com I/O concorrente (requisições HTTP e operações de DB).                          |
-| `reqwest`         | Cliente HTTP assíncrono para baixar Feeds/Sitemaps e comunicar-se com o LLM.                                       |
-| `sled`            | Banco de dados *key-value* embutido e de alto desempenho, usado para cache de irrelevância e notícias processadas. |
-| `serde` & `toml`  | Desserialização de dados para leitura do arquivo de configuração `filterflow_config.toml`.                         |
-| `async-recursion` | Atributo para habilitar a recursão em funções assíncronas (necessário para navegar em Índices de Sitemap).         |
-| `rss` & `sitemap` | *Parsers* específicos para analisar e iterar sobre o conteúdo de Feeds RSS e arquivos Sitemap XML.                 |
+## ⚙️ 4. Instalação e Uso
 
-## 🧠 3. Configuração do LLM (LM Studio)
+### 4.1. Preparação (Fedora Silverblue / Toolbox)
 
-O FilterFlow foi projetado para usar modelos de linguagem locais compatíveis com a API OpenAI (OpenAI-compatible local API). O LM Studio é uma excelente ferramenta para isso.
+Se você utiliza ambientes imutáveis, recomendamos o uso do Toolbox:
 
-### 3.1. Download e Instalação
-
-Faça o download e instale o **LM Studio** em seu sistema operacional (não no Toolbox).
-
-### 3.2. Ativação do Servidor (Endpoint)
-
-1. **Baixe um modelo:** No LM Studio, baixe e carregue um modelo no painel de **Chat/Servidor Local** (como Zephyr, Mistral, Llama, etc.).
-
-2. **Inicie o Servidor:** Vá para a aba "Servidor Local" (o ícone de engrenagem) e clique em **"Start Server"**.
-
-3. **Verifique o Endereço:** O endereço padrão do servidor é **`http://localhost:1234/v1/chat/completions`**. Este deve ser o valor configurado no campo `geral.endereco` no `filterflow_config.toml`.
-
-## 📝 4. Arquivo de Configuração (`filterflow_config.toml`)
-
-O FilterFlow é altamente configurável através deste arquivo.
-
-| **Seção/Campo**                         | **Tipo**         | **Descrição**                                                                                                                                           |
-| --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`[geral].endereco`**                  | String           | **URL do endpoint da API do LLM.** (Ex: `http://localhost:1234/v1/chat/completions`).                                                                   |
-| **`[geral].intervalo_minutos`**         | Inteiro          | Tempo de espera entre os ciclos completos de varredura.                                                                                                 |
-| **`[geral].modelo_resumo`**             | String           | Nome do modelo (apenas para referência interna do LLM/LM Studio).                                                                                       |
-| **`[geral].user_agent`**                | String           | **Importante!** O cabeçalho `User-Agent` usado nas requisições HTTP para evitar bloqueios `403 Forbidden` do servidor. Use um valor de navegador comum. |
-| **`[filtro].palavras_chave`**           | Array            | Lista de termos que tornam a notícia **RELEVANTE** (Tópicos de INCLUSÃO).                                                                               |
-| **`[filtro].indicadores_irrelevancia`** | Array            | Lista de termos que tornam a notícia **IRRELEVANTE** (Tópicos de EXCLUSÃO).                                                                             |
-| **`[[feeds]]`**                         | Array de Tabelas | Nome e URL dos **Feeds RSS** a serem monitorados.                                                                                                       |
-| **`[[sitemaps]]`**                      | Array de Tabelas | Nome e URL dos **Sitemaps (ou Sitemap Index)** a serem monitorados.                                                                                     |
-| **`[proxy].usar_proxy`**                | Booleano         | `true` ou `false` para ativar o proxy para todas as requisições.                                                                                        |
-| **`[proxy].endereco_proxy`**            | String           | Endereço completo do proxy HTTP/HTTPS.                                                                                                                  |
-
-## 🚀 5. Uso do FilterFlow
-
-Após configurar o `LM Studio` e o `filterflow_config.toml`, execute o agente:
-
-Bash
+```bash
+toolbox create -c rust-dev
+toolbox enter rust-dev
+sudo dnf install clang make -y
 
 ```
-# Dentro do Toolbox (após a compilação)
-./target/release/filterflow
+
+### 4.2. Compilação Global
+
+Na raiz do projeto (onde está o `Cargo.toml` do workspace), compile ambos os módulos:
+
+```bash
+cargo build --release
+
 ```
 
-O FilterFlow iniciará e rodará em um *loop* contínuo.
+### 4.3. Executando os Módulos
 
-- **Logs em Cores:** O agente utiliza códigos ANSI para destacar os logs e os resultados no terminal.
+Você deve rodar ambos simultaneamente para a experiência completa:
 
-- **Novidade Relevante:** Quando uma notícia é considerada relevante, ela é exibida em destaque verde, seguida pelo resumo gerado pelo LLM.
+**Iniciar o Backend (API e Crawler):**
 
-- **Cache:** Notícias já processadas ou consideradas irrelevantes são armazenadas no banco de dados `sled` (`filterflow_data`) e não serão reavaliadas em ciclos futuros.
+```bash
+cargo run -p filterflow_backend
 
-## 🤖 6. Como Funciona o Prompt de Filtragem
+```
 
-O coração da inteligência do FilterFlow está no `prompt` enviado ao LLM na função `call_llm_filter`.
+**Iniciar o Dashboard (Interface Web):**
 
-O objetivo é forçar o LLM a atuar como um classificador binário (resposta `1` ou `0`), avaliando duas condições simultâneas com base nas suas configurações:
+```bash
+cargo run -p filterflow_dash
 
-### Prompt Estruturado (Lógica Booleana)
+```
 
-O *prompt* instrui o LLM a tomar a decisão final usando a seguinte lógica:
+*Acesse o dashboard em: `http://localhost:3000*`
 
-1. **Condição de INCLUSÃO:** A notícia deve ser **principalmente** sobre um ou mais tópicos listados em `palavras_chave`.
+---
 
-2. **Condição de EXCLUSÃO:** A notícia **não** deve conter nenhum tópico listado em `indicadores_irrelevancia`.
+## 📝 5. Configuração (`filterflow_config.toml`)
 
-A resposta final esperada do LLM é:
+O arquivo de configuração agora gerencia o comportamento do agente e os parâmetros da API:
 
-- **`1` (Relevante):** Se (INCLUSÃO for **VERDADEIRA**) **E** (EXCLUSÃO for **FALSA**).
+| Seção | Campo | Descrição |
+| --- | --- | --- |
+| `[geral]` | `endereco` | URL do LM Studio (Ex: `http://localhost:1234/v1`). |
+| `[geral]` | `arquivar_md` | `true/false` para habilitar salvamento em Markdown. |
+| `[filtro]` | `palavras_chave` | Tópicos de inclusão para o LLM. |
+| `[api]` | `porta` | Porta onde o backend servirá os dados (Padrão: 4000). |
 
-- **`0` (Irrelevante):** Em qualquer outro caso (falha na inclusão OU presença de exclusão).
+---
 
-Essa filtragem em duas etapas garante que, por exemplo, uma notícia sobre "Mercado de Ações" (Inclusão) que também mencione "Celebridades" (Exclusão) seja corretamente descartada.
+## 🤖 6. Inteligência de Filtragem (LLM)
+
+O FilterFlow utiliza uma lógica booleana rigorosa no prompt para garantir alta precisão:
+
+1. **Inclusão**: A notícia deve abordar os temas de interesse.
+2. **Exclusão**: Se houver qualquer termo de irrelevância, a notícia é descartada mesmo que contenha palavras-chave.
+3. **Resumo**: Somente após passar pelo filtro, o LLM gera um resumo executivo da notícia.
+
+---
+
+## 📂 7. Estrutura de Diretórios
+
+```text
+.
+├── filterflow_backend/  # Crawler, API e Lógica de IA
+├── filterflow_dash/     # Interface Web HTMX
+├── filterflow_data/     # Persistência Sled (DB)
+├── arquivados/          # Notícias salvas em .md
+├── Cargo.toml           # Configuração do Workspace
+└── filterflow_config.toml
+
+```
+
+---
+
+## 🔌 8. Detalhamento da API (Backend)
+
+O `filterflow_backend` não é apenas um crawler; ele atua como um servidor de dados robusto. A comunicação entre o backend e o dashboard é feita via JSON através de endpoints REST.
+
+### Endpoints Principais
+
+| Método | Endpoint | Descrição |
+| --- | --- | --- |
+| `GET` | `/noticias` | Retorna a lista completa de notícias filtradas e resumidas em formato JSON. |
+| `GET` | `/status` | Retorna o estado do crawler (última varredura, quantidade de itens no DB). |
+| `POST` | `/refresh` | Força um novo ciclo de varredura nos feeds e sitemaps. |
+
+### Exemplo de Resposta JSON (`/noticias`)
+
+```json
+{
+  "id": "2024-02-22-titulo-da-noticia",
+  "titulo": "Avanços em Rust 1.76",
+  "resumo": "A nova versão traz melhorias em performance e tipos...",
+  "url": "https://exemplo.com/rust-news",
+  "data_processamento": "2024-02-22T10:00:00Z"
+}
+
+```
+
+---
+
+## 🌍 9. Variáveis de Ambiente e Configuração Avançada
+
+Embora o `filterflow_config.toml` seja o coração da configuração, o uso de **Variáveis de Ambiente** permite que o FilterFlow seja executado em containers Docker ou ambientes de CI/CD sem expor dados sensíveis.
+
+O sistema busca automaticamente por um arquivo `.env` na raiz do projeto:
+
+| Variável | Descrição | Exemplo |
+| --- | --- | --- |
+| `FILTERFLOW_PORT` | Porta do servidor Backend. | `4000` |
+| `DASH_PORT` | Porta do Dashboard Frontend. | `3000` |
+| `LLM_API_KEY` | Chave de API (se usar serviços externos como OpenAI). | `sk-xxxx...` |
+| `RUST_LOG` | Nível de detalhamento dos logs. | `info`, `debug`, `error` |
+
+### Exemplo de Arquivo `.env`
+
+```env
+# Configurações de Rede
+FILTERFLOW_PORT=4000
+DASH_PORT=3000
+
+# Logs (Útil para depuração)
+RUST_LOG=filterflow_backend=debug,filterflow_dash=info
+
+```
+
+---
+
+## 🖥️ 10. Fluxo de Dados: Do Crawler ao Dashboard
+
+Para entender como as novas capacidades de **arquivamento em Markdown** e **HTMX** interagem, veja o fluxo de vida de uma notícia:
+
+1. **Coleta**: O `backend` lê os Sitemaps/RSS configurados.
+2. **Filtragem**: O conteúdo é enviado ao LLM local. Se irrelevante, o ID vai para o `sled` (cache) e o processo para.
+3. **Persistência**:
+* O dado estruturado é salvo no `sled`.
+* **Novo!** Um arquivo `.md` é gerado na pasta `/arquivados` com o resumo e links.
+
+
+4. **Consumo**: O `filterflow_dash` solicita os dados ao endpoint `/noticias`.
+5. **Renderização**: O **HTMX** recebe o HTML pré-renderizado pelo Dash e atualiza a página do usuário sem refresh completo.
+
+---

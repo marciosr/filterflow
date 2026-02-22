@@ -1,6 +1,6 @@
 [workspace]
 members = [
     "filterflow_backend",
-    "filterflow-dash",
+    "filterflow_dash",
 ]
 resolver = "2"
