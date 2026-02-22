@@ -5,19 +5,26 @@
 [geral]
 # Frequência de atualização em minutos.
 # ATENÇÃO: O código Rust espera 'intervalo_minutos'.
-intervalo_minutos = 30
-
+intervalo_minutos = 60
+## Teste
 # Endereço API do LLM compatível com OpenAI (LM Studio, OLLAMA, etc.)
 # IMPORTANTE: Mantenha sempre com o protocolo http:// ou https://
 endereco = "http://localhost:1234/v1/chat/completions"
-
+# endereco = "http://127.0.0.1:8080/v1/chat/completions"
 # Nome do modelo a ser utilizado para resumo e análise de relevância.
-modelo_resumo = "liquid/lfm2-1.2b"
+# Moelos com reasioning (cadaeia de pensamento) não funcionam para filtragem pois sempre produzem
+# mais tokens que o necessário na resposta.
+# Obs.: Modelos do tipo reasioning (Thincking) não filtram as notícias relevantes.
+#modelo_resumo = "liquid/lfm2-1.2b"
 # Modelos alternativos:
-# modelo_resumo = "qwen/qwen3-4b-thinking-2507"
+modelo_resumo = "qwen/qwen3-4b-2507"
 # modelo_resumo = "openai/gpt-oss-20b"
-
+# modelo_resumo = "qwen3-4b-instruct-2507"
 # Definição do user agent para o reqwest nos casos de busca em sitemap (Evita bloqueios 403).
+
+#Diretório de arquivamento de notícias relevantes em Markdown
+diretorio_arquivamento = "~/Documentos/Notícias/Arquivo"
+
 #user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 user_agent = "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0"
 
@@ -29,13 +36,13 @@ max_tokens_resumo = 270
 # Temperatura do resumo
 temperatura_resumo = 0.3
 # Prompt do resumo
-max_tokens_filtro = 1
+max_tokens_filtro = 3
 temperatura_filtro = 0.2
 # Prompt passados ao LLM. Note que é importante manter os colchetes onde serão injetadas os
 # dados da notícia, para filtragem e posterior resumo.
 prompt_system_filtro = "Você é um classificador de notícias conciso."
-prompt_system_resumo = "Você é um assistente conciso e imparcial."
-prompt_user_resumo_template = "Resuma a seguinte notícia em no máximo 250 tokens em português. Se a notícia tiver em inglês o resumo deverá ser em inglês. NÃO adicione introduções como 'O resumo é:' ou 'A notícia é sobre:'.\n\nTítulo: {}\n\nCorpo/Descrição: {}"
+# prompt_system_resumo = "Você é um assistente conciso e imparcial."
+prompt_user_resumo_template = "Analise a notícia e retorne um JSON com os campos 'resumo' (máximo 250 caracteres) e 'keywords' (lista de 3 a 5 tags). Responda APENAS o JSON puro. Título: {}\n Notícia para analisar: {}\n"
 # =================================================================
 # CONFIGURAÇÃO DE PROXY (Opcional)
 # =================================================================
@@ -77,21 +84,33 @@ indicadores_relevancia = [
     "Petróleo",
     "Energia",
     "Infraestrutura",
+    "Fórmula 1",
     "Atletico Mineiro"
 ]
 indicadores_irrelevancia = [
     "celebridades",
     "fofoca",
-    "jogador"
+    "jogador",
+    "A Fazenda (Reality show)",
+    "influenciador digital",
+    "influenciadora digital",
+    "Vini Jr.",
+    "Vinícius",
+    "Virginia",
+    "Zé Felipe",
+    "Monyque Costa",
+    "Adriane Galisteu",
+    "BBB",
+    "Big Brother Brasil"
 ]
 
 # =================================================================
 # FONTES DE FEEDS RSS
 # =================================================================
 
-[[feeds]]
-nome = "G1 Minas Gerais"
-url = "https://g1.globo.com/rss/g1/minas-gerais/"
+#[[feeds]]
+#nome = "G1 Minas Gerais"
+#url = "https://g1.globo.com/rss/g1/minas-gerais/"
 
 # [[feeds]]
 # nome = "G1 Brasil"
@@ -137,9 +156,9 @@ url = "https://www.hardware.com.br/feed/"
 nome = "Slashdot"
 url = "https://rss.slashdot.org/Slashdot/slashdotMain"
 
-[[feeds]]
-nome = "INMET"
-url = "https://apiprevmet3.inmet.gov.br/avisos/rss"
+#[[feeds]]
+#nome = "INMET"
+#url = "https://apiprevmet3.inmet.gov.br/avisos/rss"
 
 [[feeds]]
 nome = "Metro Quadrado"
