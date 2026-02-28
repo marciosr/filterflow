@@ -13,7 +13,7 @@ use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 
-// --- Modelos de Dados ---
+// --- Modelos de Dados --- (Mantidos iguais)
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Noticia {
@@ -25,7 +25,6 @@ struct Noticia {
 	lida: bool,
 }
 
-// Estado agora guarda o Cliente e a URL base da API
 struct AppState {
 	http_client: Client,
 	api_url: String,
@@ -50,15 +49,13 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 	}
 }
 
-// --- Main ---
+// --- Main --- (Mantido igual)
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
 	tracing_subscriber::fmt::init();
 
-	// Configurações via ambiente
 	let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
-	// Se não houver variável, usa o localhost como padrão
 	let api_url =
 		std::env::var("FILTERFLOW_API_URL").unwrap_or_else(|_| "http://localhost:4000".to_string());
 
@@ -82,10 +79,9 @@ async fn main() -> anyhow::Result<()> {
 	Ok(())
 }
 
-// --- Handlers ---
+// --- Handlers --- (Mantido igual)
 
 async fn home_handler(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, AppError> {
-	// Monta a URL final usando a string do estado
 	let endpoint = format!("{}/api/noticias", state.api_url);
 
 	let noticias: Vec<Noticia> = state
@@ -96,41 +92,32 @@ async fn home_handler(State(state): State<Arc<AppState>>) -> Result<impl IntoRes
 		.json()
 		.await?;
 
-	let html_body = render_layout("Dash", render_home(noticias, 1, 10));
-
-	Ok(html_body)
+	Ok(render_full_page(render_home(noticias, 1, 10)))
 }
 
 // --- Templates com Maud ---
 
-fn render_layout(title: &str, content: Markup) -> Markup {
+fn render_full_page(content: Markup) -> Markup {
 	html! {
 		(DOCTYPE)
 		html lang="pt-br" {
 			head {
 				meta charset="utf-8";
-				meta name="viewport" content="width=device-width, initial-scale=1";
-				title { (title) }
-				script src="https://unpkg.com/htmx.org@1.9.10" {}
-				script src="https://unpkg.com/htmx.org/dist/ext/json-enc.js" {}
+				title { "FilterFlow Dash com Animação" }
 				style { (css_styles()) }
 			}
 			body {
-				header {
-					h1 { "FilterFlow Dashboard" }
-					p { "Monitoramento de notícias relevantes" }
-				}
-				main { (content) }
-				footer {
-					p { "Rodando em Rust e usando dados coletados pelo FilterFlow" }
-				}
+				header { h1 { "🌊 FilterFlow Dashboard" } }
+				(content)
+				script src="https://unpkg.com/htmx.org@1.9.10" {}
+				// Certifique-se de incluir esta linha se o backend esperar JSON
+				script src="https://unpkg.com/htmx.org/dist/ext/json-enc.js" {}
 			}
 		}
 	}
 }
 
 fn render_home(noticias: Vec<Noticia>, current_page: usize, _total_pages: usize) -> Markup {
-	// Note que removi o ponto e vírgula final para ser o retorno da função
 	html! {
 		div class="container"
 			hx-get="/"
@@ -139,36 +126,52 @@ fn render_home(noticias: Vec<Noticia>, current_page: usize, _total_pages: usize)
 			hx-swap="outerHTML"
 			hx-ext="json-enc"
 		{
-		@for noticia in &noticias {
-			  details class={"card " @if noticia.lida { "read" } @else { "unread" }}
-				 hx-post="http://localhost:4000/api/noticias/ler"
-				 hx-ext="json-enc"
-				 hx-trigger="toggle"
-				 // Corrigido: Usando aspas simples externas para facilitar o JSON interno
-				 hx-vals=(format!(r#"{{"id": "{}"}}"#, noticia.id))
-				 hx-swap="none"
-				 // Transição visual imediata no clique
-				 onclick="this.classList.remove('unread'); this.classList.add('read'); let badge = this.querySelector('.badge-new'); if(badge) { badge.innerText='LIDA'; badge.style.background='#444'; }"
-			  {
-				 summary class="card-header" {
-						div class="header-content" {
-						   // Sempre renderiza o badge, mas muda o conteúdo/classe baseado no estado
-						   span class="badge-new" {
-							  @if noticia.lida { "Lida" } @else { "Nova" }
-						   }
+			@for noticia in &noticias {
+				details
+					class={"card " @if noticia.lida { "read" } @else { "unread" }}
+					// MUDANÇA 1: Usamos 'click' em vez de 'toggle' para maior confiabilidade
+					hx-post="http://localhost:4000/api/noticias/ler"
+					hx-trigger="click consume"
+					hx-vals=(format!(r#"{{"id": "{}"}}"#, noticia.id))
+					hx-swap="none"
+					// MUDANÇA 2: Melhoramos o JS para não conflitar com o HTMX
+					onclick="
+                        // 1. Fecha os outros (Efeito Acordeão)
+                        document.querySelectorAll('details.card[open]').forEach(el => {
+                            if (el !== this) el.removeAttribute('open');
+                        });
 
-						   span class="date" { (noticia.data_publicacao
-							  .with_timezone(&chrono::Local)
-							  .format("%d/%m/%Y %H:%M")) }
-						   strong { (noticia.titulo) }
+                        // 2. Só executa a troca de classe se ainda não for lida
+                        if (this.classList.contains('unread')) {
+                            this.classList.remove('unread');
+                            this.classList.add('read');
+                            let badge = this.querySelector('.badge-new');
+                            if(badge) {
+                                badge.innerText='LIDA';
+                                badge.style.background='#444';
+                            }
+                        }
+                    "
+				{
+					summary class="card-header" {
+						div class="header-content" {
+							span class="badge-new" {
+								@if noticia.lida { "Lida" } @else { "Nova" }
+							}
+							span class="date" { (noticia.data_publicacao
+								.with_timezone(&chrono::Local)
+								.format("%d/%m/%Y %H:%M")) }
+							strong { (noticia.titulo) }
 						}
-				 }
-				 div class="card-body" {
-						p { (noticia.resumo) }
-						a href=(noticia.url) target="_blank" class="btn" { "Ler fonte original →" }
-				 }
-			  }
-		   }
+					}
+					div class="card-body-wrapper" {
+						div class="card-body-content" {
+							p { (noticia.resumo) }
+							a href=(noticia.url) target="_blank" class="btn" { "Ler fonte original →" }
+						}
+					}
+				}
+			}
 
 			div class="pagination" {
 				@if current_page > 1 {
@@ -185,70 +188,75 @@ fn render_home(noticias: Vec<Noticia>, current_page: usize, _total_pages: usize)
 
 fn css_styles() -> String {
 	r#"
+    /* Estilos base mantidos */
     body { font-family: system-ui, -apple-system, sans-serif; background: #121212; color: #e0e0e0; margin: 0; padding: 20px; line-height: 1.6; }
     header { text-align: center; margin-bottom: 40px; border-bottom: 1px solid #333; padding-bottom: 20px; }
     h1 { color: #4fbcff; margin: 0; }
     .container { max-width: 900px; margin: 0 auto; }
-    .card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; margin-bottom: 12px; transition: border-color 0.2s; }
-    .card:hover { border-color: #4fbcff; }
+
+    /* MODIFICAÇÃO CSS 1: Card Base */
+    .card {
+        background: #1e1e1e;
+        border: 1px solid #333;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        transition: border-color 0.3s, box-shadow 0.3s, opacity 0.3s, transform 0.3s ease-out;
+        overflow: hidden; /* Importante para a animação de deslize */
+    }
+    .card:hover { border-color: #4fbcff; box-shadow: 0 4px 12px rgba(79, 188, 255, 0.1); }
+
     .card-header { padding: 15px; cursor: pointer; list-style: none; }
     .card-header::-webkit-details-marker { display: none; }
     .header-content { display: flex; flex-direction: column; }
     .date { font-size: 0.8rem; color: #888; margin-bottom: 5px; }
-    .card-body { padding: 0 20px 20px 20px; border-top: 1px solid #333; margin-top: 10px; padding-top: 15px; }
-    .btn { display: inline-block; margin-top: 15px; padding: 8px 16px; background: #4fbcff; color: #000; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 0.9rem; }
+
+    /* MODIFICAÇÃO CSS 2: Estrutura da Animação */
+    /* O container externo (wrapper) controla a altura */
+    .card-body-wrapper {
+        display: grid;
+        grid-template-rows: 0fr; /* Começa com altura zero */
+        transition: grid-template-rows 0.4s ease-in-out, opacity 0.3s ease-in;
+        opacity: 0;
+        visibility: hidden;
+        background: #181818;
+        border-top: 1px solid transparent;
+    }
+
+    /* O container interno (content) guarda o padding e conteúdo real */
+    .card-body-content {
+        overflow: hidden; /* Impede que o texto apareça antes da hora */
+        padding: 0 20px; /* Padding lateral constante */
+        transition: padding 0.4s ease-in-out;
+    }
+
+    /* MÁGICA CSS 3: Estado Aberto */
+    details[open] .card-body-wrapper {
+        grid-template-rows: 1fr; /* Expande para a altura total do conteúdo */
+        opacity: 1;
+        visibility: visible;
+        border-top: 1px solid #333;
+    }
+
+    details[open] .card-body-content {
+        padding: 20px; /* Padding vertical aparece na expansão */
+    }
+
+    /* Botão e paginação mantidos */
+    .btn { display: inline-block; margin-top: 15px; padding: 8px 16px; background: #4fbcff; color: #000; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 0.9rem; transition: background 0.2s; }
     .btn:hover { background: #7dd3ff; }
     .pagination { text-align: center; margin-top: 30px; }
     .pagination a { color: #4fbcff; text-decoration: none; padding: 0 10px; }
-    /* Notícias Não Lidas: Destaque com borda azul à esquerda */
-    .unread {
-        border-left: 5px solid #4fbcff !important;
-    }
 
-    /* Notícias Lidas: Opacidade reduzida para tirar o foco visual */
-    .read {
-        opacity: 0.5;
-        filter: grayscale(0.5);
-        border-left: 5px solid #333 !important;
-    }
+    /* Estados de Lido/Nova mantidos */
+    .unread { border-left: 5px solid #4fbcff !important; }
+    .read { opacity: 0.6; border-left: 5px solid #333 !important; }
+    .badge-new { background: #4fbcff; color: #121212; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; margin-right: 12px; text-transform: uppercase; display: inline-block; vertical-align: middle; }
+    .read .badge-new { background: #444 !important; color: #888 !important; }
+    details[open] .badge-new { display: none; }
 
-    /* Estilo do Rótulo "Nova" */
-    .badge-new {
-        background: #4fbcff;
-        color: #121212;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: bold;
-        margin-right: 12px;
-        text-transform: uppercase;
-        display: inline-block;
-        vertical-align: middle;
-    }
+    /* Destaque visual do card aberto */
+    details[open] { border-color: #4fbcff; opacity: 1; transform: translateY(-2px); box-shadow: 0 4px 15px rgba(79, 188, 255, 0.15); }
 
-    /* Estilo quando a notícia for lida */
-    .read .badge-new {
-        background: #444 !important; /* Cinza escuro */
-        color: #888 !important;
-        display: inline-block !important; /* Garante que apareça como LIDA */
-    }
-    .card.read .badge-new {
-        backgroud: #444 !important;
-        color: #888 !important;
-    }
-    /* MÁGICA INSTANTÂNEA:
-        Assim que você clica no details e ele abre, o badge some
-        mesmo antes do refresh de 60s do HTMX */
-    details[open] .badge-new {
-        content: 'LIDA'
-        display: none;
-    }
-
-    /* Opcional: faz o card parecer lido no momento da expansão */
-    details[open] {
-        opacity: 0.7;
-        border-left: 5px solid #333 !important;
-    }
     @media (min-width: 600px) {
         .header-content { flex-direction: row; align-items: center; gap: 20px; }
         .date { margin-bottom: 0; min-width: 140px; }
